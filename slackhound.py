@@ -1,4 +1,5 @@
 #Slackhound - Slack enumeration tool
+#Author - Brad Richardson <BojackThePillager>
 import requests
 import json
 import os.path
