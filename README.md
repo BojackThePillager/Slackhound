@@ -40,31 +40,22 @@ Usage: slackhound.py [options]
 Options:
 
 
--h, --help            
-:show this help message and exit
+-h, --help :show this help message and exit
 
--a, --dumpAllUsers
-:dump all user info from Slack Workspace to csv file
+-a, --dumpAllUsers :dump all user info from Slack Workspace to csv file
 
--b GETUSER, --getUser=GETUSER
-:look up user by ID
+-b GETUSER, --getUser=GETUSER :look up user by ID
 
--c GETUSERSTATUS, --getUserStatus=GETUSERSTATUS
-:check if user is online
+-c GETUSERSTATUS, --getUserStatus=GETUSERSTATUS :check if user is online
 
--d GETUSERBYEMAIL, --getUserByEmail=GETUSERBYEMAIL
-:Lookup user by email address
+-d GETUSERBYEMAIL, --getUserByEmail=GETUSERBYEMAIL :Lookup user by email address
 
--e GETUSERLOCATION, --getUserLocation=GETUSERLOCATION
-:Get user's location and timezone
+-e GETUSERLOCATION, --getUserLocation=GETUSERLOCATION :Get user's location and timezone
 
--f GETUSERALL, --getUserAll=GETUSERALL
- :Get all user attributes
+-f GETUSERALL, --getUserAll=GETUSERALL :Get all user attributes
 
--g, --listChannels    List all Slack channels
+-g, --listChannels :List all Slack channels
 
--i USERCHANNELS, --userChannels=USERCHANNELS
-:Get channels a user belongs to
+-i USERCHANNELS, --userChannels=USERCHANNELS :Get channels a user belongs to
 
--j SEARCH, --search=SEARCH
-:Search files, messages, and posts for a keyword and put results in csv
+-j SEARCH, --search=SEARCH :Search files, messages, and posts for a keyword and put results in csv
