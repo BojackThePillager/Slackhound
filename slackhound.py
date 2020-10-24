@@ -1,4 +1,5 @@
-#Slackhound - Slack enumeration tool
+#Slackhound - Slack workspace enumeration tool for red and blue teams. v1.0
+#By Brad Richardson (BojackThePillager)
 import requests
 import json
 import os.path
