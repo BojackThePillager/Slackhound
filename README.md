@@ -38,21 +38,33 @@ View email addresses of people in a workspace
 Usage: slackhound.py [options]
 
 Options:
-  -h, --help            show this help message and exit
-  -a, --dumpAllUsers    dump all user info from Slack Workspace to csv file
-  -b GETUSER, --getUser=GETUSER
-                        look up user by ID
-  -c GETUSERSTATUS, --getUserStatus=GETUSERSTATUS
-                        check if user is online
-  -d GETUSERBYEMAIL, --getUserByEmail=GETUSERBYEMAIL
-                        Lookup user by email address
-  -e GETUSERLOCATION, --getUserLocation=GETUSERLOCATION
-                        Get user's location and timezone
-  -f GETUSERALL, --getUserAll=GETUSERALL
-                        Get all user attributes
-  -g, --listChannels    List all Slack channels
-  -i USERCHANNELS, --userChannels=USERCHANNELS
-                        Get channels a user belongs to
-  -j SEARCH, --search=SEARCH
-                        Search files, messages, and posts for a keyword and
-                        put results in csv
+
+
+-h, --help            
+:show this help message and exit
+
+-a, --dumpAllUsers
+:dump all user info from Slack Workspace to csv file
+
+-b GETUSER, --getUser=GETUSER
+:look up user by ID
+
+-c GETUSERSTATUS, --getUserStatus=GETUSERSTATUS
+:check if user is online
+
+-d GETUSERBYEMAIL, --getUserByEmail=GETUSERBYEMAIL
+:Lookup user by email address
+
+-e GETUSERLOCATION, --getUserLocation=GETUSERLOCATION
+:Get user's location and timezone
+
+-f GETUSERALL, --getUserAll=GETUSERALL
+ :Get all user attributes
+
+-g, --listChannels    List all Slack channels
+
+-i USERCHANNELS, --userChannels=USERCHANNELS
+:Get channels a user belongs to
+
+-j SEARCH, --search=SEARCH
+:Search files, messages, and posts for a keyword and put results in csv
