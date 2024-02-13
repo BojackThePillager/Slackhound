@@ -79,26 +79,40 @@ Usage: slackhound.py [options]
 
 # Options:
   -h, --help            show this help message and exit
+  
   -a, --dumpAllUsers    dump all user info from Slack Workspace to csv file and sqlite db
+  
   -b GETUSER, --getUser=GETUSER
                         get user profile, location, and check if user is
                         active
+  
   -c SEARCHUSERBYEMAIL, --searchUserByEmail=SEARCHUSERBYEMAIL
                         Lookup user by email address
+  
   -d, --listChannels    List all Slack channels an account has access to
+  
   -e USERCHANNELS, --userChannels=USERCHANNELS
                         Get channels a specific user ID belongs to
+  
   -f SEARCHFILES, --searchFiles=SEARCHFILES
                         Search files for a keyword and put results in csv
+ 
   -g SEARCHMESSAGES, --searchMessages=SEARCHMESSAGES
                         Search messages for a keyword and put results in csv
+  
   -i, --sendMessage     send messages to channel or Slack user
+  
   -j, --uploadFile      upload a file to user or channel
+  
   -k GETCONVERSATION, --getConversation=GETCONVERSATION
                         show channel's conversation history
+  
   -l SETSNOOZER, --setSnoozer=SETSNOOZER
                         Turn on Do Not Distrub (in minutes)
+  
   -m GETFILELIST, --getFileList=GETFILELIST
                         Get list of files uploaded by this user
+  
   -n, --sendReminder    Creates a reminder to user from Slackbot
+  
   -z, --checkToken      check if token is valid
