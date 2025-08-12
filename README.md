@@ -2,13 +2,13 @@
 
 Slackhound 2.1 Released 8-11-2025
 
-# A lot of refactoring and changes to make Slackhound more robust. This update supports using user and bot tokens and built-in checking and prioritization for user type tokens, but will automatically fall back to bot token if supplied.
+A lot of refactoring and changes to make Slackhound more robust. This update supports using user and bot tokens and built-in checking and prioritization for user type tokens, but will automatically fall back to bot token if supplied.
 
 # See changelog for a full list of changes
 
 Slackhound 2.0 Released 2-12-2024
 
-# New Features include sending messages to users, saving workspace users and profiles to a sqlite database, channel reconnaissance, snoozing notifications, and more!
+New Features include sending messages to users, saving workspace users and profiles to a sqlite database, channel reconnaissance, snoozing notifications, and more!
 
 Slackhound is a command line tool for red and blue teams to quickly perform reconnaissance of a Slack workspace/organization. Slackhound makes collection of an organization's users, files, messages, etc. quickly searchable and large objects are written to CSV for offline review. Red Teams can use Slachound to export or lookup user/employee's directory information similar to Active Directory without the concern of detection seen with active directory reconnaissance. 
 
