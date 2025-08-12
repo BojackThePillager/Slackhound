@@ -1,393 +1,411 @@
 # Slackhound - Slack enumeration tool
-# Version 2 by Brad Richardson
+# Version 2.1 by Brad Richardson
 # Use legally,responsibily and at your own risk
 # No guarantees or rights are provided by using this software
 
+#!/usr/bin/env python3
+"""
+slackhound - refactored and a more houndable version of Slackhound
+"""
 import json
-import os.path
+import os
 from os import path
 from pathlib import Path
 import sys
 import argparse
-from optparse import OptionParser
-import optparse
 import csv
 import requests
 import pandas as pd
 from pandas import json_normalize
-import numpy as np
 import sqlite3 
 import sqlalchemy
 import yaml
+import time
 from colors.colors import Colors
 
-api_url_base = 'https://slack.com/api/users.list'
-api_token = ""
-bearer_token = ""
+def read_token_file(filename='token.txt'):
+    if path.exists(filename):
+        with open(filename, 'r') as f:
+            return f.read().strip()
+    else:
+        print(f"Error: token file {filename} NOT FOUND!")
+        return None
 
-# Ensure we have and can read in and store a token
-if path.exists('token.txt'):
-    with open('token.txt', 'r') as file:
-        api_token = file.read()
-        api_token = api_token.strip('\n')
-else:
-    print("Error: token file NOT FOUND!")
+def get_headers(token):
+    return {'Authorization': f'Bearer {token}'}
 
-# set bearer token variable and headers
-bearer_token = 'Bearer ' + api_token
-api_headers = {'Authorization': bearer_token}
+def check_token(token):
+    """Return JSON response from auth.test for the given token."""
+    try:
+        response = requests.post("https://slack.com/api/auth.test", headers=get_headers(token))
+        return response.json()
+    except requests.exceptions.RequestException as e:
+        print(Colors.FAIL + Colors.BOLD + f"Token check error: {e}" + Colors.ENDC)
+        return None
 
-parser = optparse.OptionParser()
-parser.add_option("-a", "--dumpAllUsers", action='store_true', dest='dumpAllUsers', help='dump all user info from Slack Workspace to csv file and creates a sqlite database')
-parser.add_option("-b", "--getUser", dest='getUser', help='get user profile, location, and check if user is active')
-parser.add_option("-c", "--searchUserByEmail", help="Lookup user by email address")
-parser.add_option("-d", "--listChannels", action='store_true', dest='listChannels', help="List all Slack channels an account has access to")
-parser.add_option("-e", "--userChannels", help="Get channels a specific user ID belongs to")
-parser.add_option("-f", "--searchFiles", help="Search files for a keyword and put results in csv")
-parser.add_option("-g", "--searchMessages", help="Search messages for a keyword and put results in csv")
-parser.add_option("-i", "--sendMessage", help="send messages to channel or Slack user", action='store_true', dest='sendSlackMessage')
-parser.add_option("-j", "--uploadFile", action='store_true', dest='uploadFile', help='upload a file to user or channel')
-parser.add_option("-k", "--getConversation", dest='getConversation', help="show channel's conversation history")
-parser.add_option("-l", "--setSnoozer", dest='setSnoozer', help="Turn on Do Not Distrub (in minutes)")
-parser.add_option("-m", "--getFileList", dest='getFileList', help="Get list of files uploaded by this user")
-parser.add_option("-n", "--sendReminder", dest='sendReminder', action='store_true', help="Creates a reminder to user from Slackbot")
-parser.add_option("-z", "--checkToken", dest='checkToken', action='store_true', help="check token")
+def choose_token(api_name):
+    """
+    Return which token to use for the API name.
+    For example:
+    - Use bot token for chat.postMessage, reminders.add, search.messages, search.files
+    - Use user token otherwise
+    """
+    # These are the Slack API endpoints that require bot tokens:
+    bot_token_apis = {
+        'chat.postMessage',
+        'reminders.add',
+        'search.messages',
+        'search.files',
+        'files.upload',
+        'conversations.history',
+        'dnd.setSnooze',
+        'files.list',
+    }
 
-(options, args) = parser.parse_args()
+    # Map api_name to token:
+    if api_name in bot_token_apis:
+        if tokens['bot']:
+            return tokens['bot']
+        else:
+            # fallback to user token if bot token not available
+            return tokens['user']
+    else:
+        # default user token
+        return tokens['user']
 
-def dumpAllUsers():
-     if checkToken():
-          try:        
-               jsonResponse = requests.get(api_url_base, headers=api_headers)
-               data = json.loads(jsonResponse.text)
-               slack_data = data['members']
-               data_file = open('slack_objects_dump.csv', 'w', newline='')
-               csv_writer = csv.writer(data_file)
-               count = 0
-               for slack_details in slack_data:
-                    if count == 0:
-                         header = slack_details.keys()
-                         csv_writer.writerow(header)
-                         count += 1
-                    csv_writer.writerow(slack_details.values())
-               data_file.close()
+def api_request(method, api_endpoint, params=None, data=None, files=None, api_name=None):
+    token_used = choose_token(api_name) if api_name else tokens['user']
+    print(f"Using token starting with {token_used[:10]} for API '{api_name or api_endpoint}'")  # DEBUG
+    headers = get_headers(token_used)
+    url = f'https://slack.com/api/{api_endpoint}'
 
-               print(Colors.OKGREEN + Colors.BOLD + 'slack_objects_dump.csv successfully written' + Colors.ENDC)
+    try:
+        if method == 'GET':
+            resp = requests.get(url, headers=headers, params=params)
+        else:
+            resp = requests.post(url, headers=headers, data=data, files=files)
+    except requests.exceptions.RequestException as e:
+        print(Colors.FAIL + Colors.BOLD + f"Request error for {api_endpoint}: {e}" + Colors.ENDC)
+        return None
 
-               table_name = "slackmembers"
+    try:
+        result = resp.json()
+    except json.JSONDecodeError:
+        print(Colors.FAIL + Colors.BOLD + "Failed to parse JSON response" + Colors.ENDC)
+        return None
 
-
-               conn = sqlite3.connect('data.db')
-               c = conn.cursor()
-               conn.commit()
-
-               df = json_normalize(data['members'])
-               if 'profile.image_512' in df.columns:
-                    del df['profile.image_512']
-               if 'profile.image_192' in df.columns:
-                    del df['profile.image_192']
-               if 'profile.image_72' in df.columns:
-                    del df['profile.image_72']
-               if 'profile.image_48' in df.columns:
-                    del df['profile.image_48']
-               if 'profile.image_32' in df.columns:
-                    del df['profile.image_32']
-               if 'profile.image_24' in df.columns:
-                    del df['profile.image_24']
-               if 'profile.status_emoji' in df.columns:
-                    del df['profile.status_emoji']
-               if 'profile.status_text_canonical' in df.columns:
-                    del df['profile.status_text_canonical']
-               if 'profile.status_emoji_display_info' in df.columns:
-                    del df['profile.status_emoji_display_info']
-               if 'enterprise_user.is_owner' in df.columns:
-                    del df['enterprise_user.is_owner']
-
-               engine = sqlalchemy.create_engine('sqlite:///data.db')
-
-               df.to_sql(table_name, engine, index=False, if_exists='replace')
-               c.close()
-               conn.close()
-               print(Colors.OKGREEN + Colors.BOLD + 'data.db sqlite3 file successfully written' + Colors.ENDC)
-          except requests.exceptions.RequestException as exception:
-              print(Colors.FAIL + Colors.BOLD + "ERROR : " + str(exception) + Colors.ENDC)
-     else:
-          exit()
-
-def getUser(user_id):
-    api_url_base = 'https://slack.com/api/users.getPresence?pretty=1&user='
-    if checkToken():
-        if scopeCheck(api_url_base, user_id):
+    if 'error' in result and result['error'] == 'not_allowed_token_type':
+        print(f"Token starting with {token_used[:10]} not allowed for this API, retrying with other token")  # DEBUG
+        other_token = tokens['bot'] if token_used == tokens['user'] else tokens['user']
+        if other_token and other_token != token_used:
+            print(f"Retrying with token starting with {other_token[:10]}")  # DEBUG
+            headers = get_headers(other_token)
             try:
-                 response = requests.get(api_url_base + user_id, headers=api_headers)
-                 todos = json.loads(response.text)
-                 print("Status :", todos['presence'])
-                 api_url_base = 'https://slack.com/api/users.info?pretty=1&user='
-                 response = requests.get(api_url_base + user_id, headers=api_headers)
-                 todos = json.loads(response.text)
-                 print(get_pretty_json_string(todos))
-            except requests.exceptions.RequestException as exception:
-                 print(Colors.FAIL + Colors.BOLD + "ERROR : " + str(exception) + Colors.ENDC)
-                 exit()
+                if method == 'GET':
+                    resp = requests.get(url, headers=headers, params=params)
+                else:
+                    resp = requests.post(url, headers=headers, data=data, files=files)
+                result = resp.json()
+                if 'error' not in result:
+                    return result
+            except requests.exceptions.RequestException as e:
+                print(Colors.FAIL + Colors.BOLD + f"Retry request error for {api_endpoint}: {e}" + Colors.ENDC)
+                return None
+    return result
+
+def print_pretty_json(data):
+    print(yaml.dump(data, sort_keys=False, default_flow_style=False))
+
+# Initialize tokens dictionary
+tokens = {
+    'user': None,
+    'bot': None,
+}
+
+def main():
+    parser = argparse.ArgumentParser(description="Slackhound - Slack utility")
+    parser.add_argument("-a", "--dumpAllUsers", action="store_true", help="dump all user info from Slack Workspace to csv file")
+    parser.add_argument("-b", "--getUser", help="get user profile, presence, and info by user ID")
+    parser.add_argument("-c", "--searchUserByEmail", help="Lookup user by email address")
+    parser.add_argument("-d", "--listChannels", action="store_true", help="List all Slack channels an account has access to")
+    parser.add_argument("-e", "--userChannels", help="Get channels a specific user ID belongs to")
+    parser.add_argument("-f", "--searchFiles", help="Search files for a keyword and put results in csv")
+    parser.add_argument("-g", "--searchMessages", help="Search messages for a keyword and put results in csv")
+    parser.add_argument("-i", "--sendMessage", action="store_true", help="send messages to channel or Slack user (requires --message & --channel)")
+    parser.add_argument("--message", help="Message text to send (used with -i)")
+    parser.add_argument("-j", "--uploadFile", action="store_true", help="upload a file to user or channel (requires --file & --channel)")
+    parser.add_argument("--file", help="Path to file to upload")
+    parser.add_argument("--channel", help="Channel id for sending/uploading or as target for message")
+    parser.add_argument("--comment", help="Initial comment for file upload")
+    parser.add_argument("-k", "--getConversation", help="show channel's conversation history (provide channel id)")
+    parser.add_argument("-l", "--setSnoozer", type=int, help="Turn on Do Not Disturb (in minutes)")
+    parser.add_argument("-m", "--getFileList", help="Get list of files uploaded by this user (provide user id)")
+    parser.add_argument("-n", "--sendReminder", action="store_true", help="Creates a reminder to user from Slackbot (use --reminder_text, --reminder_time, --channel)")
+    parser.add_argument("--reminder_text", help="Reminder text")
+    parser.add_argument("--reminder_time", help="Reminder time (EPOCH or 'in 15 minutes')")
+    parser.add_argument("--token1", help="User token (overrides token.txt)")
+    parser.add_argument("--token2", help="Bot token (overrides env SLACK_TOKEN_BOT)")
+    parser.add_argument("-z", "--checkToken", action="store_true", help="check token (prints full raw response)")
+    args = parser.parse_args()
+
+    # Load tokens
+    global tokens
+    if args.token1:
+        tokens['user'] = args.token1.strip()
     else:
-         exit()
+        tokens['user'] = read_token_file()  # from token.txt
 
-def scopeCheck(api,element):
-    api_check = requests.get(api + element, headers=api_headers).json()
-    print("Checking token API permissions: ")
-    if str(api_check['ok']) == 'True':
-        success = True
-        print(Colors.OKGREEN + Colors.BOLD + str(api_check['ok']) + Colors.ENDC)
-        return success
+    if args.token2:
+        tokens['bot'] = args.token2.strip()
     else:
-        success = False
-        print(Colors.FAIL + Colors.BOLD + "Failure: Error : " + str(api_check['error']) + Colors.ENDC)
-        return success
+        tokens['bot'] = os.environ.get('SLACK_TOKEN_BOT')
 
-def checkToken():
-    tokenCheck = requests.post("https://slack.com/api/auth.test", headers=api_headers).json()
-    print("Checking token: ")
-    if str(tokenCheck['ok']) == 'True':
-        success = True
-        print(Colors.OKGREEN + Colors.BOLD + str(tokenCheck) + Colors.ENDC)
-        return success
-    else: 
-        success = False
-        print(Colors.FAIL + Colors.BOLD + "Failure: Error : " + str(tokenCheck['error']) + Colors.ENDC)
-        return success
+    if not tokens['user']:
+        print(Colors.FAIL + "User token missing. Provide token.txt or --token1" + Colors.ENDC)
+        sys.exit(1)
 
-def searchUserByEmail(email_addr):
-    api_url_base = 'https://slack.com/api/users.lookupByEmail?pretty=1&email='
-    if checkToken():
-         try:
-              response = requests.get(api_url_base + email_addr, headers=api_headers)
-              todos = json.loads(response.text)
-              if str(todos['ok']) == 'True':
-                   print(f'Email, {email_addr}')
-                   print(todos)
-                   print("User ID :", todos['user']['id'])
-                   print("Team ID :", todos['user']['team_id'])
-                   print("Real Name :", todos['user']['real_name'])
-                   print("Display Name :", todos['user']['real_name'])
-                   print("Time Zone :", todos['user']['tz'])
-                   print("Time Zone Label :", todos['user']['tz_label'])
-                   print("Is Admin : ", todos['user']['is_admin'])
-                   print("Uses MFA :", todos['user']['has_2fa'])
-                   print("Last Update :", todos['user']['updated'])
-              else:
-                  print("Error :", todos['error']) 
-         except requests.exceptions.RequestException as exception:
-              print(str(exception))
+    # --checkToken prints detailed auth.test for both tokens
+    if args.checkToken:
+        print(Colors.BOLD + "Checking User Token:" + Colors.ENDC)
+        user_check = check_token(tokens['user'])
+        print_pretty_json(user_check)
+        print()
+        if tokens['bot']:
+            print(Colors.BOLD + "Checking Bot Token:" + Colors.ENDC)
+            bot_check = check_token(tokens['bot'])
+            print_pretty_json(bot_check)
+        else:
+            print(Colors.WARNING + "No Bot Token provided to check." + Colors.ENDC)
+        sys.exit(0)
+
+    # Now handle each option, silently choosing correct token inside api_request()
+
+    if args.dumpAllUsers:
+        dump_all_users()
+
+    elif args.getUser:
+        get_user(args.getUser)
+
+    elif args.searchUserByEmail:
+        search_user_by_email(args.searchUserByEmail)
+
+    elif args.listChannels:
+        list_channels()
+
+    elif args.userChannels:
+        user_channels(args.userChannels)
+
+    elif args.searchFiles:
+        search_files(args.searchFiles)
+
+    elif args.searchMessages:
+        search_messages(args.searchMessages)
+
+    elif args.sendMessage:
+        if not args.message or not args.channel:
+            print(Colors.FAIL + "Error: --message and --channel required with -i" + Colors.ENDC)
+            sys.exit(1)
+        send_slack_message(args.message, args.channel)
+
+    elif args.uploadFile:
+        if not args.file or not args.channel:
+            print(Colors.FAIL + "Error: --file and --channel required with -j" + Colors.ENDC)
+            sys.exit(1)
+        upload_file(args.file, args.channel, args.comment)
+
+    elif args.getConversation:
+        get_conversation(args.getConversation)
+
+    elif args.setSnoozer is not None:
+        set_snoozer(args.setSnoozer)
+
+    elif args.getFileList:
+        get_file_list(args.getFileList)
+
+    elif args.sendReminder:
+        if not args.reminder_text or not args.reminder_time or not args.channel:
+            print(Colors.FAIL + "Error: --reminder_text, --reminder_time, and --channel required with -n" + Colors.ENDC)
+            sys.exit(1)
+        send_reminder(args.channel, args.reminder_text, args.reminder_time)
+
     else:
-         exit()
+        parser.print_help()
+        sys.exit(0)
 
-def listChannels():
-    api_url_base = 'https://slack.com/api/conversations.list?pretty=1&types=public_channel,private_channel'
-    if checkToken():
-         try:
-              response = requests.get(api_url_base, headers=api_headers).json()
-              print(get_pretty_json_string(response))
-         except requests.exceptions.RequestException as exception:
-              print(str(exception))
-    else:    
-         exit()
+# Now define the functions called above, using api_request with appropriate api_name
 
-def userChannels(user_id):
-    api_url_base = 'https://slack.com/api/users.conversations?pretty=1&user='
-    if checkToken():
-         try:
-              response = requests.get(api_url_base + user_id, headers=api_headers).json()
-              for key, value in response.items():
-                   print(key, ":", value)
-         except requests.exceptions.RequestException as exception:
-              print(str(exception))
+def dump_all_users():
+    data = api_request('GET', 'users.list', api_name='users.list')
+    if not data or not data.get('ok'):
+        print(Colors.FAIL + f"Failed to get users.list: {data.get('error') if data else 'No response'}" + Colors.ENDC)
+        return
+
+    members = data['members']
+    with open('slack_objects_dump.csv', 'w', newline='') as csvfile:
+        writer = csv.writer(csvfile)
+        # Write header once
+        header_written = False
+        for member in members:
+            if not header_written:
+                writer.writerow(member.keys())
+                header_written = True
+            writer.writerow(member.values())
+    print(Colors.OKGREEN + "slack_objects_dump.csv successfully written" + Colors.ENDC)
+
+    # Save to sqlite3
+    df = json_normalize(members)
+
+    # Clean some image/status columns if exist
+    for col in ['profile.image_512', 'profile.image_192', 'profile.image_72', 'profile.image_48', 'profile.image_32', 'profile.image_24', 'profile.status_emoji', 'profile.status_text_canonical', 'profile.status_emoji_display_info', 'enterprise_user.is_owner']:
+        if col in df.columns:
+            del df[col]
+
+    engine = sqlalchemy.create_engine('sqlite:///data.db')
+    df.to_sql('slackmembers', engine, index=False, if_exists='replace')
+    print(Colors.OKGREEN + "data.db sqlite3 file successfully written" + Colors.ENDC)
+
+def get_user(user_id):
+    presence = api_request('GET', 'users.getPresence', params={'user': user_id}, api_name='users.getPresence')
+    if not presence or not presence.get('ok'):
+        print(Colors.FAIL + f"Failed to get presence: {presence.get('error') if presence else 'No response'}" + Colors.ENDC)
+        return
+    print("Status:", presence.get('presence'))
+
+    info = api_request('GET', 'users.info', params={'user': user_id}, api_name='users.info')
+    if not info or not info.get('ok'):
+        print(Colors.FAIL + f"Failed to get user info: {info.get('error') if info else 'No response'}" + Colors.ENDC)
+        return
+    print_pretty_json(info)
+
+def search_user_by_email(email):
+    data = api_request('GET', 'users.lookupByEmail', params={'email': email}, api_name='users.lookupByEmail')
+    if not data or not data.get('ok'):
+        print(Colors.FAIL + f"Failed to lookup user by email: {data.get('error') if data else 'No response'}" + Colors.ENDC)
+        return
+    user = data['user']
+    print(f"Email: {email}")
+    print(f"User ID: {user.get('id')}")
+    print(f"Team ID: {user.get('team_id')}")
+    print(f"Real Name: {user.get('real_name')}")
+    print(f"Display Name: {user.get('real_name')}")
+    print(f"Time Zone: {user.get('tz')}")
+    print(f"Time Zone Label: {user.get('tz_label')}")
+    print(f"Is Admin: {user.get('is_admin')}")
+    print(f"Uses MFA: {user.get('has_2fa')}")
+    print(f"Last Update: {user.get('updated')}")
+
+def list_channels():
+    data = api_request('GET', 'conversations.list', params={'types':'public_channel,private_channel'}, api_name='conversations.list')
+    if not data or not data.get('ok'):
+        print(Colors.FAIL + f"Failed to list channels: {data.get('error') if data else 'No response'}" + Colors.ENDC)
+        return
+    print_pretty_json(data)
+
+def user_channels(user_id):
+    data = api_request('GET', 'users.conversations', params={'user': user_id}, api_name='users.conversations')
+    if not data or not data.get('ok'):
+        print(Colors.FAIL + f"Failed to get user channels: {data.get('error') if data else 'No response'}" + Colors.ENDC)
+        return
+    print_pretty_json(data)
+
+def search_files(keyword):
+    data = api_request('GET', 'search.files', params={'query': keyword}, api_name='search.files')
+    if not data or not data.get('ok'):
+        print(Colors.FAIL + f"Failed to search files: {data.get('error') if data else 'No response'}" + Colors.ENDC)
+        return
+    matches = data.get('files', {}).get('matches', [])
+    with open('slack_files_search.csv', 'w', newline='') as csvfile:
+        writer = csv.writer(csvfile)
+        header_written = False
+        for match in matches:
+            if not header_written:
+                writer.writerow(match.keys())
+                header_written = True
+            writer.writerow(match.values())
+    print(Colors.OKGREEN + "slack_files_search.csv successfully written" + Colors.ENDC)
+
+def search_messages(keyword):
+    data = api_request('GET', 'search.messages', params={'query': keyword}, api_name='search.messages')
+    if not data or not data.get('ok'):
+        print(Colors.FAIL + f"Failed to search messages: {data.get('error') if data else 'No response'}" + Colors.ENDC)
+        return
+    matches = data.get('messages', {}).get('matches', [])
+    with open('slack_messages_search.csv', 'w', newline='') as csvfile:
+        writer = csv.writer(csvfile)
+        header_written = False
+        for match in matches:
+            if not header_written:
+                writer.writerow(match.keys())
+                header_written = True
+            writer.writerow(match.values())
+    print(Colors.OKGREEN + "slack_messages_search.csv successfully written" + Colors.ENDC)
+
+def send_slack_message(message, channel):
+    data = {
+        'text': message,
+        'channel': channel
+    }
+    result = api_request('POST', 'chat.postMessage', data=data, api_name='chat.postMessage')
+    if not result or not result.get('ok'):
+        print(Colors.FAIL + f"Failed to send message: {result.get('error') if result else 'No response'}" + Colors.ENDC)
     else:
-       exit()
+        print(Colors.OKGREEN + "Message sent" + Colors.ENDC)
 
-def searchFiles(keyword):
-    api_url_base = 'https://slack.com/api/search.files?pretty=1&query='
-    if checkToken():
-         try:
-              response = requests.get(api_url_base + keyword, headers=api_headers)
-              data = json.loads(response.text)
-              slack_data = data['files']['matches']
-              data_file = open('slack_files_search.csv', 'w', newline='')
-              csv_writer = csv.writer(data_file)
-              count = 0
-              for slack_details in slack_data:
-                   if count == 0:
-                        header = slack_details.keys()
-                        csv_writer.writerow(header)
-                        count += 1
-                        csv_writer.writerow(slack_details.values())
-              data_file.close()
-         except requests.exceptions.RequestException as exception:
-              print(str(exception))
+def get_conversation(channel):
+    params = {'channel': channel}
+    data = api_request('GET', 'conversations.history', params=params, api_name='conversations.history')
+    if not data or not data.get('ok'):
+        print(Colors.FAIL + f"Failed to get conversation: {data.get('error') if data else 'No response'}" + Colors.ENDC)
+        return
+    print_pretty_json(data)
+
+def set_snoozer(num_minutes):
+    data = {'num_minutes': num_minutes}
+    result = api_request('POST', 'dnd.setSnooze', data=data, api_name='dnd.setSnooze')
+    if not result or not result.get('ok'):
+        print(Colors.FAIL + f"Failed to set snoozer: {result.get('error') if result else 'No response'}" + Colors.ENDC)
     else:
-        exit()
+        print(Colors.OKGREEN + f"Snoozing notifications for {num_minutes} minutes" + Colors.ENDC)
 
-def searchMessages(keyword):
-    api_url_base = 'https://slack.com/api/search.messages?pretty=1&query='
-    if checkToken():
-         try:
-              response = requests.get(api_url_base + keyword, headers=api_headers)
-              data = json.loads(response.text)
-              slack_data = data['messages']['matches']
-              data_file = open('slack_messages_search.csv', 'w', newline='')
-              csv_writer = csv.writer(data_file)
-              count = 0
-              for slack_details in slack_data:
-                   if count == 0:
-                       header = slack_details.keys()
-                       csv_writer.writerow(header)
-                       count += 1
-                       csv_writer.writerow(slack_details.values())
-              data_file.close()
-         except requests.exceptions.RequestException as exception:
-              print(str(exception))
+def get_file_list(user_id):
+    data = api_request('GET', 'files.list', params={'user': user_id}, api_name='files.list')
+    if not data or not data.get('ok'):
+        print(Colors.FAIL + f"Failed to get file list: {data.get('error') if data else 'No response'}" + Colors.ENDC)
+        return
+    print_pretty_json(data)
+
+def send_reminder(channel, reminder_text, reminder_time):
+    data = {
+        'text': reminder_text,
+        'time': reminder_time,
+        'user': channel  # Slack API expects 'user' for reminders, channel arg is user id here
+    }
+    result = api_request('POST', 'reminders.add', data=data, api_name='reminders.add')
+    if not result or not result.get('ok'):
+        print(Colors.FAIL + f"Failed to send reminder: {result.get('error') if result else 'No response'}" + Colors.ENDC)
     else:
-        exit()
+        print(Colors.OKGREEN + "Reminder created successfully" + Colors.ENDC)
 
-def sendSlackMessage(message, channel):
-    post_dict = {}
-    post_dict['text'] = message
-    post_dict['channel'] = channel
-    post_dict['token'] = api_token
-    api_url_base = 'https://slack.com/api/chat.postMessage?=pretty=1'
-    if checkToken():
-        try:
-           response = requests.post(api_url_base, data = post_dict, headers = api_headers)
-           assert response.status_code == 200
-           print("Message sent")
-        except requests.exceptions.RequestException as exception:
-            print(str(exception))
+def upload_file(file_path, channel, comment=None):
+    path_obj = Path(file_path)
+    if not path_obj.is_file():
+        print(Colors.FAIL + f"File not found: {file_path}" + Colors.ENDC)
+        return
+    data = {
+        'channels': channel,
+    }
+    if comment:
+        data['initial_comment'] = comment
+
+    with open(file_path, 'rb') as f:
+        files = {'file': (path_obj.name, f)}
+        result = api_request('POST', 'files.upload', data=data, files=files, api_name='files.upload')
+
+    if not result or not result.get('ok'):
+        print(Colors.FAIL + f"Failed to upload file: {result.get('error') if result else 'No response'}" + Colors.ENDC)
     else:
-        exit()
-    
-def getConversation(channel):
-    post_dict = {}
-    post_dict['channel'] = channel
-    post_dict['token'] = api_token
-    api_url_base = 'https://slack.com/api/conversations.history?=pretty=1'
-    if checkToken():
-        try:
-           response = requests.post(api_url_base, data = post_dict, headers = api_headers).json()
-           print(get_pretty_json_string(response))
-        except requests.exceptions.RequestException as exception:
-            print(str(exception))
-    else:
-        exit()
+        print(Colors.OKGREEN + "File uploaded successfully" + Colors.ENDC)
 
-def setSnoozer(num_minutes):
-    post_dict = {}
-    post_dict['num_minutes'] = num_minutes
-    post_dict['token'] = api_token
-    api_url_base = 'https://slack.com/api/dnd.setSnooze?=pretty=1'
-    if checkToken():
-        try:
-            response = requests.post(api_url_base, data = post_dict, headers = api_headers)
-            print(Colors.OKGREEN + Colors.BOLD + 'Snoozing notifications for ' + num_minutes + ' minutes' + Colors.ENDC)
-        except requests.exceptions.RequestException as exception:
-            print(str(exception))
-    else:
-        exit()
+if __name__ == "__main__":
+    main()
 
-def getFileList(id):
-    post_dict = {}
-    post_dict['user'] = id
-    post_dict['token'] = api_token
-    api_url_base = 'https://slack.com/api/files.list?=pretty=1'
-    if checkToken():
-        try:
-            response = requests.post(api_url_base, data = post_dict, headers = api_headers).json()
-            print(get_pretty_json_string(response))
-        except requests.exceptions.RequestException as exception:
-            print(str(exception))
-    else:
-        exit()
-
-def sendReminder(user,my_text,my_time):
-    post_dict = {}
-    print(user)
-    print(my_time)
-    post_dict['user'] = user
-    post_dict['text'] = my_text
-    post_dict['time'] = my_time
-    post_dict['token'] = api_token
-    api_url_base = 'https://slack.com/api/reminders.add?'
-    if checkToken():
-        try:
-            response = requests.post(api_url_base, data = post_dict, headers = api_headers).json()
-            print(get_pretty_json_string(response))
-        except requests.exceptions.RequestException as exception:
-            print(str(exception))
-    else:
-        exit()
-
-def get_pretty_json_string(value):
-    return yaml.dump(value, sort_keys=False, default_flow_style=False)
-
-def uploadFile(file_name,channel_id,initial_comment):
-     post_dict = {}
-     post_dict['filename'] = file_name
-     post_dict['file'] = file_name 
-     post_dict['channels'] = channel_id
-     post_dict['initial_comment'] = initial_comment
-     post_dict['token'] = api_token
-     print(post_dict)
-     my_file = { 'file' : (file_name, open(file_name, 'rb'), 'txt')}
-     api_url_base = 'https://slack.com/api/files.upload?=pretty=1'
-     path_to_file = file_name
-     path = Path(path_to_file)
-     if path.is_file():
-          if checkToken():
-             try:
-                response = requests.post(api_url_base, data = post_dict, headers = api_headers, files = my_file).json()
-                print(get_pretty_json_string(response))
-                print(Colors.OKGREEN + Colors.BOLD + 'File uploaded successfully' + Colors.ENDC)
-             except requests.exceptions.RequestException as exception:
-                  print(str(exception))
-          else:
-              exit()
-     else:
-         print("Error: Cannot find filename: " + file_name)
-
-def readlines(selArgs):
-    if options.dumpAllUsers:
-        dumpAllUsers()
-    if options.searchUserByEmail:
-        searchUserByEmail(options.searchUserByEmail)
-    if options.getUser:
-        getUser(options.getUser)
-    if options.listChannels:
-        listChannels()
-    if options.userChannels:
-        userChannels(options.userChannels)
-    if options.searchFiles:
-        searchFiles(options.searchFiles)
-    if options.searchMessages:
-        searchMessages(options.searchMessages)
-    if options.sendSlackMessage:
-        options.message = input('Enter Message Text:')
-        options.channel = input('Enter Channel or user ID:')
-        sendSlackMessage(options.message,options.channel)
-    if options.getConversation:
-        getConversation(options.getConversation)
-    if options.setSnoozer:
-        setSnoozer(options.setSnoozer)
-    if options.getFileList:
-        getFileList(options.getFileList)
-    if options.sendReminder:
-       options.my_text = input("Enter Reminder Message: ")
-       options.my_time = input("Enter EPOCH time or Ex. in 15 minutes, or every Thursday to create reminder date: ")
-       options.user = input("Enter Target User Id: ")
-       sendReminder(options.user,options.my_text,options.my_time)
-    if options.uploadFile:
-       options.file_name = input("Enter filename and path: ")
-       options.channel = input("Enter channel ID: ")
-       options.initial_comment = input("Enter file comment: ")
-       uploadFile(options.file_name, options.channel, options.initial_comment)
-    if options.checkToken:
-       checkToken()
-    else: { print("") }
-readlines(options)

@@ -1,5 +1,11 @@
 # Slackhound
 
+Slackhound 2.1 Released 8-11-2025
+
+# A lot of refactoring and changes to make Slackhound more robust. This update supports using user and bot tokens and built-in checking and prioritization for user type tokens, but will automatically fall back to bot token if supplied.
+
+# See changelog for a full list of changes
+
 Slackhound 2.0 Released 2-12-2024
 
 # New Features include sending messages to users, saving workspace users and profiles to a sqlite database, channel reconnaissance, snoozing notifications, and more!
